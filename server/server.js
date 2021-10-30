@@ -47,6 +47,9 @@ debug("Importing Notification");
 const { Notification } = require("./notification");
 Notification.init();
 
+debug("Importing Proxy");
+const { Proxy } = require("./proxy");
+
 debug("Importing Database");
 const Database = require("./database");
 
@@ -117,7 +120,7 @@ const io = new Server(server);
 module.exports.io = io;
 
 // Must be after io instantiation
-const { sendNotificationList, sendHeartbeatList, sendImportantHeartbeatList, sendInfo } = require("./client");
+const { sendNotificationList, sendHeartbeatList, sendImportantHeartbeatList, sendInfo, sendProxyList } = require("./client");
 const { statusPageSocketHandler } = require("./socket-handlers/status-page-socket-handler");
 const databaseSocketHandler = require("./socket-handlers/database-socket-handler");
 const TwoFA = require("./2fa");
@@ -588,6 +591,7 @@ exports.entryPage = "dashboard";
                 bean.dns_resolve_type = monitor.dns_resolve_type;
                 bean.dns_resolve_server = monitor.dns_resolve_server;
                 bean.pushToken = monitor.pushToken;
+                bean.proxyId = Number.isInteger(monitor.proxyId) ? monitor.proxyId : null;
 
                 await R.store(bean);
 
@@ -1050,6 +1054,52 @@ exports.entryPage = "dashboard";
             }
         });
 
+        socket.on("addProxy", async (proxy, proxyID, callback) => {
+            try {
+                checkLogin(socket);
+
+                const proxyBean = await Proxy.save(proxy, proxyID, socket.userID);
+                await sendProxyList(socket);
+
+                if (proxy.applyExisting) {
+                    await restartMonitors(socket.userID);
+                }
+
+                callback({
+                    ok: true,
+                    msg: "Saved",
+                    id: proxyBean.id,
+                });
+
+            } catch (e) {
+                callback({
+                    ok: false,
+                    msg: e.message,
+                });
+            }
+        });
+
+        socket.on("deleteProxy", async (proxyID, callback) => {
+            try {
+                checkLogin(socket);
+
+                await Proxy.delete(proxyID, socket.userID);
+                await sendProxyList(socket);
+                await restartMonitors(socket.userID);
+
+                callback({
+                    ok: true,
+                    msg: "Deleted",
+                });
+
+            } catch (e) {
+                callback({
+                    ok: false,
+                    msg: e.message,
+                });
+            }
+        });
+
         socket.on("checkApprise", async (callback) => {
             try {
                 checkLogin(socket);
@@ -1068,6 +1118,7 @@ exports.entryPage = "dashboard";
                 console.log(`Importing Backup, User ID: ${socket.userID}, Version: ${backupData.version}`);
 
                 let notificationListData = backupData.notificationList;
+                let proxyListData = backupData.proxyList;
                 let monitorListData = backupData.monitorList;
 
                 let version17x = compareVersions.compare(backupData.version, "1.7.0", ">=");
@@ -1086,6 +1137,7 @@ exports.entryPage = "dashboard";
                     await R.exec("DELETE FROM monitor_tag");
                     await R.exec("DELETE FROM tag");
                     await R.exec("DELETE FROM monitor");
+                    await R.exec("DELETE FROM proxy");
                 }
 
                 // Only starts importing if the backup file contains at least one notification
@@ -1102,6 +1154,24 @@ exports.entryPage = "dashboard";
                             await Notification.save(notification, null, socket.userID);
 
                         }
+                    }
+                }
+
+                // Only starts importing if the backup file contains at least one proxy
+                if (proxyListData.length >= 1) {
+                    const proxies = await R.findAll("proxy");
+
+                    // Loop over proxy list and save proxies
+                    for (const proxy of proxyListData) {
+                        const exists = proxies.find(item => item.id === proxy.id);
+
+                        // Do not process when proxy already exists in import handle is skip and keep
+                        if (["skip", "keep"].includes(importHandle) && !exists) {
+                            return;
+                        }
+
+                        // Save proxy as new entry if exists update exists one
+                        await Proxy.save(proxy, exists ? proxy.id : undefined, proxy.userId);
                     }
                 }
 
@@ -1154,6 +1224,7 @@ exports.entryPage = "dashboard";
                                 dns_resolve_type: monitorListData[i].dns_resolve_type,
                                 dns_resolve_server: monitorListData[i].dns_resolve_server,
                                 notificationIDList: {},
+                                proxy_id: monitorListData[i].proxy_id || null,
                             };
 
                             if (monitorListData[i].pushToken) {
@@ -1389,6 +1460,7 @@ async function afterLogin(socket, user) {
 
     let monitorList = await sendMonitorList(socket);
     sendNotificationList(socket);
+    sendProxyList(socket);
 
     await sleep(500);
 
@@ -1477,6 +1549,19 @@ async function startMonitor(userID, monitorID) {
 
 async function restartMonitor(userID, monitorID) {
     return await startMonitor(userID, monitorID);
+}
+
+async function restartMonitors(userID) {
+    // Fetch all active monitors for user
+    const monitors = await R.getAll("SELECT id FROM monitor WHERE active = 1 AND user_id = ?", [userID]);
+
+    for (const monitor of monitors) {
+        // Start updated monitor
+        await startMonitor(userID, monitor.id);
+
+        // Give some delays, so all monitors won't make request at the same moment when just start the server.
+        await sleep(getRandomInt(300, 1000));
+    }
 }
 
 async function pauseMonitor(userID, monitorID) {
