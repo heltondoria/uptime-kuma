@@ -1,0 +1,44 @@
+# Simple docker-composer.yml
+# You can change your port or volume location
+
+version: '3.3'
+networks:
+  app-tier:
+    driver: bridge
+
+services:
+  db:
+    image: mariadb
+    container_name: kumadb
+    restart: on-failure
+    environment:
+      MYSQL_ROOT_PASSWORD: example
+      MYSQL_DATABASE: kumadb
+      MYSQL_USER: kumadb_user
+      MYSQL_PASSWORD: kumadb_pass
+    expose:
+      - "3306"
+    ports:
+      - 127.0.0.1:3306:3306
+    networks:
+      - app-tier
+    volumes:
+      - ${PWD}/mariadb:/var/lib/mysql
+
+  uptime-kuma:
+    depends_on:
+      - db
+    image: uptime-kuma
+    container_name: uptime-kuma
+    environment:
+      DB_MYSQL_HOSTS: kumadb
+      DB_MYSQL_PORT: 3306
+      DB_MYSQL_USER: kumadb_user
+      DB_MYSQL_PASSWORD: kumadb_pass
+      DB_MYSQL_DBNAME: kumadb
+    volumes:
+      - ./uptime-kuma:/app/data
+    ports:
+      - 3001:3001
+    networks:
+      - app-tier
