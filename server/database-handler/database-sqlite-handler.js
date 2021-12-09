@@ -4,12 +4,12 @@ const { setSetting, setting } = require("../util-server");
 const { debug, sleep } = require("../../src/util");
 const dayjs = require("dayjs");
 const knex = require("knex");
-const { Database } = require("./database");
+
 
 /**
  * Database & App Data Folder
  */
-class DatabaseSqlite extends Database {
+class DatabaseSqlite {
 
     static templatePath = "./db/kuma.db";
 
@@ -66,19 +66,24 @@ class DatabaseSqlite extends Database {
 
     static init(args) {
         // Data Directory (must be end with "/")
-        Database.dataDir = process.env.DATA_DIR || args["data-dir"] || "./data/";
-        Database.path = Database.dataDir + "kuma.db";
-        if (! fs.existsSync(Database.dataDir)) {
-            fs.mkdirSync(Database.dataDir, { recursive: true });
+        DatabaseSqlite.dataDir = process.env.DATA_DIR || args["data-dir"] || "./data/";
+        DatabaseSqlite.path = DatabaseSqlite.dataDir + "kuma.db";
+        if (! fs.existsSync(DatabaseSqlite.dataDir)) {
+            fs.mkdirSync(DatabaseSqlite.dataDir, { recursive: true });
         }
 
-        Database.uploadDir = Database.dataDir + "upload/";
+        DatabaseSqlite.uploadDir = DatabaseSqlite.dataDir + "upload/";
 
-        if (! fs.existsSync(Database.uploadDir)) {
-            fs.mkdirSync(Database.uploadDir, { recursive: true });
+        if (! fs.existsSync(DatabaseSqlite.uploadDir)) {
+            fs.mkdirSync(DatabaseSqlite.uploadDir, { recursive: true });
         }
 
-        console.log(`Data Dir: ${Database.dataDir}`);
+        console.log(`Data Dir: ${DatabaseSqlite.dataDir}`);
+
+        if (! fs.existsSync(DatabaseSqlite.path)) {
+            console.log("Copying Database");
+            fs.copyFileSync(DatabaseSqlite.templatePath, DatabaseSqlite.path);
+        }
     }
 
     static async connect(testMode = false) {
@@ -90,7 +95,7 @@ class DatabaseSqlite extends Database {
         const knexInstance = knex({
             client: Dialect,
             connection: {
-                filename: Database.path,
+                filename: DatabaseSqlite.path,
                 acquireConnectionTimeout: acquireConnectionTimeout,
             },
             useNullAsDefault: true,
@@ -154,12 +159,12 @@ class DatabaseSqlite extends Database {
                 for (let i = version + 1; i <= this.latestVersion; i++) {
                     const sqlFile = `./db/patch${i}.sql`;
                     console.info(`Patching ${sqlFile}`);
-                    await Database.importSQLFile(sqlFile);
+                    await DatabaseSqlite.importSQLFile(sqlFile);
                     console.info(`Patched ${sqlFile}`);
                     await setSetting("database_version", i);
                 }
             } catch (ex) {
-                await Database.close();
+                await DatabaseSqlite.close();
 
                 console.error(ex);
                 console.error("Start Uptime-Kuma failed due to issue patching the database");
@@ -198,7 +203,7 @@ class DatabaseSqlite extends Database {
             }
 
         } catch (ex) {
-            await Database.close();
+            await DatabaseSqlite.close();
 
             console.error(ex);
             console.error("Start Uptime-Kuma failed due to issue patching the database");
@@ -293,18 +298,18 @@ class DatabaseSqlite extends Database {
      */
     static async close() {
         const listener = (reason, p) => {
-            Database.noReject = false;
+            DatabaseSqlite.noReject = false;
         };
         process.addListener("unhandledRejection", listener);
 
         console.log("Closing the database");
 
         while (true) {
-            Database.noReject = true;
+            DatabaseSqlite.noReject = true;
             await R.close();
             await sleep(2000);
 
-            if (Database.noReject) {
+            if (DatabaseSqlite.noReject) {
                 break;
             } else {
                 console.log("Waiting to close the database");
@@ -324,15 +329,15 @@ class DatabaseSqlite extends Database {
         if (! this.backupPath) {
             console.info("Backing up the database");
             this.backupPath = this.dataDir + "kuma.db.bak" + version;
-            fs.copyFileSync(Database.path, this.backupPath);
+            fs.copyFileSync(DatabaseSqlite.path, this.backupPath);
 
-            const shmPath = Database.path + "-shm";
+            const shmPath = DatabaseSqlite.path + "-shm";
             if (fs.existsSync(shmPath)) {
                 this.backupShmPath = shmPath + ".bak" + version;
                 fs.copyFileSync(shmPath, this.backupShmPath);
             }
 
-            const walPath = Database.path + "-wal";
+            const walPath = DatabaseSqlite.path + "-wal";
             if (fs.existsSync(walPath)) {
                 this.backupWalPath = walPath + ".bak" + version;
                 fs.copyFileSync(walPath, this.backupWalPath);
@@ -347,13 +352,13 @@ class DatabaseSqlite extends Database {
         if (this.backupPath) {
             console.error("Patching the database failed!!! Restoring the backup");
 
-            const shmPath = Database.path + "-shm";
-            const walPath = Database.path + "-wal";
+            const shmPath = DatabaseSqlite.path + "-shm";
+            const walPath = DatabaseSqlite.path + "-wal";
 
             // Delete patch failed db
             try {
-                if (fs.existsSync(Database.path)) {
-                    fs.unlinkSync(Database.path);
+                if (fs.existsSync(DatabaseSqlite.path)) {
+                    fs.unlinkSync(DatabaseSqlite.path);
                 }
 
                 if (fs.existsSync(shmPath)) {
@@ -369,7 +374,7 @@ class DatabaseSqlite extends Database {
             }
 
             // Restore backup
-            fs.copyFileSync(this.backupPath, Database.path);
+            fs.copyFileSync(this.backupPath, DatabaseSqlite.path);
 
             if (this.backupShmPath) {
                 fs.copyFileSync(this.backupShmPath, shmPath);
@@ -385,8 +390,8 @@ class DatabaseSqlite extends Database {
     }
 
     static getSize() {
-        debug("Database.getSize()");
-        let stats = fs.statSync(Database.path);
+        debug("DatabaseSqlite.getSize()");
+        let stats = fs.statSync(DatabaseSqlite.path);
         debug(stats);
         return stats.size;
     }
