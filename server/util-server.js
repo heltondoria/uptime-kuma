@@ -113,11 +113,11 @@ exports.dnsResolve = function (hostname, resolver_server, rrtype) {
 };
 
 exports.setting = async function (key) {
-    let value = await R.getCell("SELECT `value` FROM setting WHERE `key` = ? ", [
-        key,
-    ]);
-
+    let value;
     try {
+        value = await R.getCell("SELECT `value` FROM setting WHERE `key` = ? ", [
+            key,
+        ]);
         const v = JSON.parse(value);
         debug(`Get Setting: ${key}: ${v}`);
         return v;
