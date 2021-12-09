@@ -81,6 +81,7 @@
         "jwt-decode": "^3.1.2",
         "knex": "^0.95.14",
         "limiter": "^2.1.0",
+        "mysql": "^2.18.1",
         "nodemailer": "~6.6.5",
         "notp": "~2.0.3",
         "password-hash": "~1.2.2",
