@@ -2,6 +2,7 @@ const https = require("https");
 const dayjs = require("dayjs");
 const utc = require("dayjs/plugin/utc");
 let timezone = require("dayjs/plugin/timezone");
+const julian = require("julian");
 dayjs.extend(utc);
 dayjs.extend(timezone);
 const axios = require("axios");
@@ -212,7 +213,7 @@ class Monitor extends BeanModel {
                         debug("Cert Info Query Time: " + (dayjs().valueOf() - certInfoStartTime) + "ms");
                     }
 
-                    if (process.env.UPTIME_KUMA_LOG_RESPONSE_BODY_MONITOR_ID == this.id) {
+                    if (process.env.UPTIME_KUMA_LOG_RESPONSE_BODY_MONITOR_ID === this.id) {
                         console.log(res.data);
                     }
 
@@ -252,24 +253,24 @@ class Monitor extends BeanModel {
                     let dnsRes = await dnsResolve(this.hostname, this.dns_resolve_server, this.dns_resolve_type);
                     bean.ping = dayjs().valueOf() - startTime;
 
-                    if (this.dns_resolve_type == "A" || this.dns_resolve_type == "AAAA" || this.dns_resolve_type == "TXT") {
+                    if (this.dns_resolve_type === "A" || this.dns_resolve_type === "AAAA" || this.dns_resolve_type === "TXT") {
                         dnsMessage += "Records: ";
                         dnsMessage += dnsRes.join(" | ");
-                    } else if (this.dns_resolve_type == "CNAME" || this.dns_resolve_type == "PTR") {
+                    } else if (this.dns_resolve_type === "CNAME" || this.dns_resolve_type === "PTR") {
                         dnsMessage = dnsRes[0];
-                    } else if (this.dns_resolve_type == "CAA") {
+                    } else if (this.dns_resolve_type === "CAA") {
                         dnsMessage = dnsRes[0].issue;
-                    } else if (this.dns_resolve_type == "MX") {
+                    } else if (this.dns_resolve_type === "MX") {
                         dnsRes.forEach(record => {
                             dnsMessage += `Hostname: ${record.exchange} - Priority: ${record.priority} | `;
                         });
                         dnsMessage = dnsMessage.slice(0, -2);
-                    } else if (this.dns_resolve_type == "NS") {
+                    } else if (this.dns_resolve_type === "NS") {
                         dnsMessage += "Servers: ";
                         dnsMessage += dnsRes.join(" | ");
-                    } else if (this.dns_resolve_type == "SOA") {
+                    } else if (this.dns_resolve_type === "SOA") {
                         dnsMessage += `NS-Name: ${dnsRes.nsname} | Hostmaster: ${dnsRes.hostmaster} | Serial: ${dnsRes.serial} | Refresh: ${dnsRes.refresh} | Retry: ${dnsRes.retry} | Expire: ${dnsRes.expire} | MinTTL: ${dnsRes.minttl}`;
-                    } else if (this.dns_resolve_type == "SRV") {
+                    } else if (this.dns_resolve_type === "SRV") {
                         dnsRes.forEach(record => {
                             dnsMessage += `Name: ${record.name} | Port: ${record.port} | Priority: ${record.priority} | Weight: ${record.weight} | `;
                         });
@@ -492,7 +493,7 @@ class Monitor extends BeanModel {
             this.id,
         ]);
 
-        if (tls_info_bean == null) {
+        if (tls_info_bean === null) {
             tls_info_bean = R.dispense("monitor_tls_info");
             tls_info_bean.monitor_id = this.id;
         } else {
@@ -547,15 +548,22 @@ class Monitor extends BeanModel {
     static async sendAvgPing(duration, io, monitorID, userID) {
         const timeLogger = new TimeLogger();
 
-        let avgPing = parseInt(await R.getCell(`
+        let avgPing;
+        try {
+            let timeInHours = R.isoDateTime(dayjs.utc().subtract(duration, "hour"));
+            console.info("timeInHours: " + timeInHours);
+            avgPing = parseInt(await R.getCell(`
             SELECT AVG(ping)
             FROM heartbeat
-            WHERE time > DATETIME('now', ? || ' hours')
+            WHERE time > ?
             AND ping IS NOT NULL
             AND monitor_id = ? `, [
-            -duration,
-            monitorID,
-        ]));
+                timeInHours,
+                monitorID,
+            ]));
+        } catch (ex) {
+            console.error(ex)
+        }
 
         timeLogger.print(`[Monitor: ${monitorID}] avgPing`);
 
@@ -576,67 +584,104 @@ class Monitor extends BeanModel {
      * Calculation based on:
      * https://www.uptrends.com/support/kb/reporting/calculation-of-uptime-and-downtime
      * @param duration : int Hours
+     * @param monitorID: int Id of the monitor
      */
     static async calcUptime(duration, monitorID) {
         const timeLogger = new TimeLogger();
-
         const startTime = R.isoDateTime(dayjs.utc().subtract(duration, "hour"));
 
-        // Handle if heartbeat duration longer than the target duration
-        // e.g. If the last beat's duration is bigger that the 24hrs window, it will use the duration between the (beat time - window margin) (THEN case in SQL)
-        let result = await R.getRow(`
-            SELECT
-               -- SUM all duration, also trim off the beat out of time window
-                SUM(
-                    CASE
-                        WHEN (JULIANDAY(\`time\`) - JULIANDAY(?)) * 86400 < duration
-                        THEN (JULIANDAY(\`time\`) - JULIANDAY(?)) * 86400
-                        ELSE duration
-                    END
-                ) AS total_duration,
-
-               -- SUM all uptime duration, also trim off the beat out of time window
-                SUM(
-                    CASE
-                        WHEN (status = 1)
-                        THEN
-                            CASE
-                                WHEN (JULIANDAY(\`time\`) - JULIANDAY(?)) * 86400 < duration
-                                    THEN (JULIANDAY(\`time\`) - JULIANDAY(?)) * 86400
-                                ELSE duration
-                            END
-                        END
-                ) AS uptime_duration
+        let result = await R.getAll(`
+            SELECT time, status
             FROM heartbeat
             WHERE time > ?
-            AND monitor_id = ?
-        `, [
-            startTime, startTime, startTime, startTime, startTime,
-            monitorID,
-        ]);
-
-        timeLogger.print(`[Monitor: ${monitorID}][${duration}] sendUptime`);
-
-        let totalDuration = result.total_duration;
-        let uptimeDuration = result.uptime_duration;
+            AND monitor_id = ?`,
+            [startTime, monitorID]);
         let uptime = 0;
+        if (result != null) {
+            timeLogger.print(`[Monitor: ${monitorID}][${duration}] sendUptime`);
 
+            let totalDuration = await this.calcTotalDuration(result, startTime, duration);
+            let uptimeDuration = await this.calcUptimeDuration(result, startTime, duration);
+
+            uptime = await this.calcServiceUptime(totalDuration, uptimeDuration, monitorID);
+        } else {
+            console.log('No heartbeat found for the selected monitor.')
+        }
+        return uptime.toFixed(2);
+    }
+
+    static async calcServiceUptime(totalDuration, uptimeDuration, monitorID) {
+        let uptime = 0;
         if (totalDuration > 0) {
             uptime = uptimeDuration / totalDuration;
             if (uptime < 0) {
                 uptime = 0;
             }
-
         } else {
             // Handle new monitor with only one beat, because the beat's duration = 0
-            let status = parseInt(await R.getCell("SELECT `status` FROM heartbeat WHERE monitor_id = ?", [ monitorID ]));
+            let status = parseInt(await R.getCell("SELECT `status` FROM heartbeat WHERE monitor_id = ?", [monitorID]));
 
             if (status === UP) {
                 uptime = 1;
             }
         }
-
         return uptime;
+    }
+
+    /**
+     * Calculate the total duration given a list of heartbeats.
+     *
+     * @param heartbeatList : LooseObject<any>[] List of heartbeat to be summarized
+     * @param startTime: string Start date of interval
+     * @param duration : int Duration in Hours
+     */
+    static async calcTotalDuration(heartbeatList, startTime, duration) {
+        let totalDuration = 0;
+        if (heartbeatList != null) {
+            for (let heartbeat of heartbeatList) {
+                let heartBeatTimeInJulianDay = julian.toJulianDay(heartbeat.time);
+                let startTimeInJulianDay = julian.toJulianDay(startTime);
+
+                // Handle if heartbeat duration longer than the target duration
+                // e.g. If the last beat's duration is bigger that the 24hrs window, it will use the duration between the (beat time - window margin)
+                if ((heartBeatTimeInJulianDay - startTimeInJulianDay) * 86400 < duration) {
+                    totalDuration = totalDuration + ((heartBeatTimeInJulianDay - startTimeInJulianDay) * 86400);
+                } else {
+                    totalDuration = totalDuration + duration;
+                }
+            }
+        } else {
+            console.error("There is no heartbeat over which to calculate totalDuration.");
+        }
+        return totalDuration;
+    }
+
+    /**
+     * Calculate the uptime duration given a list of heartbeats.
+     *
+     * @param heartbeatList : LooseObject<any>[] List of heartbeat to be summarized
+     * @param startTime: string Start date of interval
+     * @param duration : int Duration in Hours
+     */
+    static async calcUptimeDuration(heartbeatList, startTime, duration) {
+        let uptimeDuration = 0;
+        // const thousand_milliseconds = 1000;
+        if (heartbeatList != null) {
+            for (let heartbeat of heartbeatList) {
+                let heartBeatTimeInJulianDay = julian.toJulianDay(heartbeat.time);
+                let startTimeInJulianDay = julian.toJulianDay(startTime);
+                if (heartbeat.status === UP) {
+                    if ((heartBeatTimeInJulianDay - startTimeInJulianDay) * 86400 < duration) {
+                        uptimeDuration = uptimeDuration + ((heartBeatTimeInJulianDay - startTimeInJulianDay) * 86400);
+                    } else {
+                        uptimeDuration = uptimeDuration + duration;
+                    }
+                }
+            }
+        } else {
+            console.error("There is no heartbeat over which to calculate uptimeDuration.");
+        }
+        return uptimeDuration;
     }
 
     /**

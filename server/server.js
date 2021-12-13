@@ -121,6 +121,7 @@ const { sendNotificationList, sendHeartbeatList, sendImportantHeartbeatList, sen
 const { statusPageSocketHandler } = require("./socket-handlers/status-page-socket-handler");
 const databaseSocketHandler = require("./socket-handlers/database-socket-handler");
 const TwoFA = require("./2fa");
+const dayjs = require("dayjs");
 
 app.use(express.json());
 
@@ -664,14 +665,16 @@ exports.entryPage = "dashboard";
                     throw new Error("Invalid period.");
                 }
 
+                let startTime = R.isoDateTime(dayjs.utc().subtract(period, "hour"));
+
                 let list = await R.getAll(`
                     SELECT * FROM heartbeat
                     WHERE monitor_id = ? AND
-                    time > DATETIME('now', '-' || ? || ' hours')
+                    time > ?
                     ORDER BY time ASC
                 `, [
                     monitorID,
-                    period,
+                    startTime,
                 ]);
 
                 callback({
@@ -1420,11 +1423,6 @@ async function getMonitorJSONList(userID) {
 }
 
 async function initDatabase(testMode = false) {
-    if (! fs.existsSync(Database.path)) {
-        console.log("Copying Database");
-        fs.copyFileSync(Database.templatePath, Database.path);
-    }
-
     console.log("Connecting to the Database");
     await Database.connect(testMode);
     console.log("Connected");
