@@ -584,62 +584,30 @@ class Monitor extends BeanModel {
      * Calculation based on:
      * https://www.uptrends.com/support/kb/reporting/calculation-of-uptime-and-downtime
      * @param duration : int Hours
+     * @param monitorID: int Id of the monitor
      */
     static async calcUptime(duration, monitorID) {
         const timeLogger = new TimeLogger();
-
         const startTime = R.isoDateTime(dayjs.utc().subtract(duration, "hour"));
 
-        // Handle if heartbeat duration longer than the target duration
-        // e.g. If the last beat's duration is bigger that the 24hrs window, it will use the duration between the (beat time - window margin) (THEN case in SQL)
         let result = await R.getAll(`
             SELECT time, status
             FROM heartbeat
             WHERE time > ?
             AND monitor_id = ?`,
             [startTime, monitorID]);
-        //     SELECT
-        //        -- SUM all duration, also trim off the beat out of time window
-        //         SUM(
-        //             CASE
-        //                 WHEN (JULIANDAY(\`time\`) - JULIANDAY(?)) * 86400 < duration
-        //                 THEN (JULIANDAY(\`time\`) - JULIANDAY(?)) * 86400
-        //                 ELSE duration
-        //             END
-        //         ) AS total_duration,
-        //
-        //        -- SUM all uptime duration, also trim off the beat out of time window
-        //         SUM(
-        //             CASE
-        //                 WHEN (status = 1)
-        //                 THEN
-        //                     CASE
-        //                         WHEN (JULIANDAY(\`time\`) - JULIANDAY(?)) * 86400 < duration
-        //                             THEN (JULIANDAY(\`time\`) - JULIANDAY(?)) * 86400
-        //                         ELSE duration
-        //                     END
-        //                 END
-        //         ) AS uptime_duration
-        //     FROM heartbeat
-        //     WHERE time > ?
-        //     AND monitor_id = ?
-        // `, [
-        //     startTime, startTime, startTime, startTime, startTime,
-        //     monitorID,
-        // ]);
         let uptime = 0;
         if (result != null) {
             timeLogger.print(`[Monitor: ${monitorID}][${duration}] sendUptime`);
 
-            let totalDuration = await this.calcTotalDuration(result, duration);
-            let uptimeDuration = await this.calcUptimeDuration(result, duration);
+            let totalDuration = await this.calcTotalDuration(result, startTime, duration);
+            let uptimeDuration = await this.calcUptimeDuration(result, startTime, duration);
 
             uptime = await this.calcServiceUptime(totalDuration, uptimeDuration, monitorID);
         } else {
             console.log('No heartbeat found for the selected monitor.')
         }
-
-        return uptime;
+        return uptime.toFixed(2);
     }
 
     static async calcServiceUptime(totalDuration, uptimeDuration, monitorID) {
@@ -649,7 +617,6 @@ class Monitor extends BeanModel {
             if (uptime < 0) {
                 uptime = 0;
             }
-
         } else {
             // Handle new monitor with only one beat, because the beat's duration = 0
             let status = parseInt(await R.getCell("SELECT `status` FROM heartbeat WHERE monitor_id = ?", [monitorID]));
@@ -662,21 +629,23 @@ class Monitor extends BeanModel {
     }
 
     /**
-     * Calculate the total durantion over a set o heartbeats.
+     * Calculate the total duration given a list of heartbeats.
      *
      * @param heartbeatList : LooseObject<any>[] List of heartbeat to be summarized
+     * @param startTime: string Start date of interval
      * @param duration : int Duration in Hours
      */
-    static async calcTotalDuration(heartbeatList, duration) {
+    static async calcTotalDuration(heartbeatList, startTime, duration) {
         let totalDuration = 0;
-        const thousand_milliseconds = 1000;
         if (heartbeatList != null) {
             for (let heartbeat of heartbeatList) {
-                let heartBeatTimeInJulianDay = julian.toMillisecondsInJulianDay(heartbeat.time);
-                let currentTimeInJulianDay = julian.toMillisecondsInJulianDay(dayjs.utc().subtract(duration, "hour"));
+                let heartBeatTimeInJulianDay = julian.toJulianDay(heartbeat.time);
+                let startTimeInJulianDay = julian.toJulianDay(startTime);
 
-                if ((heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds < duration) {
-                    totalDuration = totalDuration + (heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds
+                // Handle if heartbeat duration longer than the target duration
+                // e.g. If the last beat's duration is bigger that the 24hrs window, it will use the duration between the (beat time - window margin)
+                if ((heartBeatTimeInJulianDay - startTimeInJulianDay) * 86400 < duration) {
+                    totalDuration = totalDuration + ((heartBeatTimeInJulianDay - startTimeInJulianDay) * 86400);
                 } else {
                     totalDuration = totalDuration + duration;
                 }
@@ -688,21 +657,22 @@ class Monitor extends BeanModel {
     }
 
     /**
-     * Calculate the uptime durantion over a set o heartbeats.
+     * Calculate the uptime duration given a list of heartbeats.
      *
      * @param heartbeatList : LooseObject<any>[] List of heartbeat to be summarized
+     * @param startTime: string Start date of interval
      * @param duration : int Duration in Hours
      */
-    static async calcUptimeDuration(heartbeatList, duration) {
+    static async calcUptimeDuration(heartbeatList, startTime, duration) {
         let uptimeDuration = 0;
-        const thousand_milliseconds = 1000;
+        // const thousand_milliseconds = 1000;
         if (heartbeatList != null) {
             for (let heartbeat of heartbeatList) {
-                let heartBeatTimeInJulianDay = julian.toMillisecondsInJulianDay(heartbeat.time);
-                let currentTimeInJulianDay = julian.toMillisecondsInJulianDay(dayjs.utc().subtract(duration, "hour"));
+                let heartBeatTimeInJulianDay = julian.toJulianDay(heartbeat.time);
+                let startTimeInJulianDay = julian.toJulianDay(startTime);
                 if (heartbeat.status === UP) {
-                    if ((heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds < duration) {
-                        uptimeDuration = uptimeDuration + (heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds
+                    if ((heartBeatTimeInJulianDay - startTimeInJulianDay) * 86400 < duration) {
+                        uptimeDuration = uptimeDuration + ((heartBeatTimeInJulianDay - startTimeInJulianDay) * 86400);
                     } else {
                         uptimeDuration = uptimeDuration + duration;
                     }
