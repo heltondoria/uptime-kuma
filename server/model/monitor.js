@@ -664,7 +664,7 @@ class Monitor extends BeanModel {
     /**
      * Calculate the total durantion over a set o heartbeats.
      *
-     * @param heartbeatList : Promise<LooseObject<any>[]> List of heartbeat to be summarized
+     * @param heartbeatList : LooseObject<any>[] List of heartbeat to be summarized
      * @param duration : int Duration in Hours
      */
     static async calcTotalDuration(heartbeatList, duration) {
@@ -674,8 +674,10 @@ class Monitor extends BeanModel {
             for (let heartbeat of heartbeatList) {
                 let heartBeatTimeInJulianDay = julian.toMillisecondsInJulianDay(heartbeat.time);
                 let currentTimeInJulianDay = julian.toMillisecondsInJulianDay(dayjs.utc().subtract(duration, "hour"));
-                totalDuration = totalDuration + (heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds
-                if ((heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds >= duration) {
+
+                if ((heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds < duration) {
+                    totalDuration = totalDuration + (heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds
+                } else {
                     totalDuration = totalDuration + duration;
                 }
             }
@@ -688,7 +690,7 @@ class Monitor extends BeanModel {
     /**
      * Calculate the uptime durantion over a set o heartbeats.
      *
-     * @param heartbeatList : Promise<LooseObject<any>[]> List of heartbeat to be summarized
+     * @param heartbeatList : LooseObject<any>[] List of heartbeat to be summarized
      * @param duration : int Duration in Hours
      */
     static async calcUptimeDuration(heartbeatList, duration) {
@@ -698,9 +700,10 @@ class Monitor extends BeanModel {
             for (let heartbeat of heartbeatList) {
                 let heartBeatTimeInJulianDay = julian.toMillisecondsInJulianDay(heartbeat.time);
                 let currentTimeInJulianDay = julian.toMillisecondsInJulianDay(dayjs.utc().subtract(duration, "hour"));
-                if (heartbeat.status === 1) {
-                    uptimeDuration = uptimeDuration + (heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds
-                    if ((heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds >= duration) {
+                if (heartbeat.status === UP) {
+                    if ((heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds < duration) {
+                        uptimeDuration = uptimeDuration + (heartBeatTimeInJulianDay - currentTimeInJulianDay) / thousand_milliseconds
+                    } else {
                         uptimeDuration = uptimeDuration + duration;
                     }
                 }
