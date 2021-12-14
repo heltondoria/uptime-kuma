@@ -74,6 +74,9 @@ export default {
                 security: {
                     title: this.$t("Security"),
                 },
+                proxies: {
+                    title: this.$t("Proxies"),
+                },
                 backup: {
                     title: this.$t("Backup"),
                 },
