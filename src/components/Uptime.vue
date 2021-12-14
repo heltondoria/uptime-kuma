@@ -3,6 +3,8 @@
 </template>
 
 <script>
+import {roundTo} from 'round-to';
+
 export default {
     props: {
         monitor: Object,
@@ -19,7 +21,7 @@ export default {
             let key = this.monitor.id + "_" + this.type;
 
             if (this.$root.uptimeList[key] !== undefined) {
-                return Math.round(this.$root.uptimeList[key] * 10000) / 100 + "%";
+                return roundTo(this.$root.uptimeList[key], 2) + "%";
             }
 
             return this.$t("notAvailableShort")
