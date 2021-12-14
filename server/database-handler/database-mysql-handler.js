@@ -65,6 +65,7 @@ class DatabaseMysql {
      */
     static patchList = {
         "patch-initial-schema.sql": true,
+        "patch-proxy.sql": true,
     };
 
     /**

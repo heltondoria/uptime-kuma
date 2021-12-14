@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS proxy
+(
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT,
+    protocol VARCHAR(10) NOT NULL,
+    host VARCHAR(255) NOT NULL,
+    port SMALLINT NOT NULL,
+    auth BOOLEAN NOT NULL,
+    username VARCHAR(255) NULL,
+    password VARCHAR(255) NULL,
+    active BOOLEAN NOT NULL DEFAULT 1,
+    `default` BOOLEAN NOT NULL DEFAULT 0,
+    created_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES user (id)
+            ON UPDATE CASCADE ON DELETE SET NULL
+);
+
+ALTER TABLE monitor
+    ADD COLUMN proxy_id INT ;
+ALTER TABLE monitor
+    ADD CONSTRAINT fk_proxy FOREIGN KEY (proxy_id) REFERENCES proxy (id)
+    ON UPDATE CASCADE ON DELETE SET NULL;
+

@@ -66,14 +66,14 @@ CREATE TABLE IF NOT EXISTS monitor
     ignore_tls                BOOLEAN  NOT NULL DEFAULT 0,
     upside_down               BOOLEAN  NOT NULL DEFAULT 0,
     maxredirects              INT      NOT NULL DEFAULT 10,
-    accepted_statuscodes_json TEXT     NOT NULL DEFAULT '["200-299"]',
+    accepted_statuscodes_json TEXT     NOT NULL,
     dns_resolve_type          VARCHAR(5),
     dns_resolve_server        VARCHAR(255),
     dns_last_result           VARCHAR(255),
     push_token                VARCHAR(20)       DEFAULT NULL,
     basic_auth_user           TEXT              DEFAULT NULL,
     basic_auth_pass           TEXT              DEFAULT NULL,
-    method                    TEXT     NOT NULL DEFAULT 'GET',
+    method                    TEXT     NOT NULL,
     body                      TEXT              DEFAULT NULL,
     headers                   TEXT              DEFAULT NULL,
     retry_interval            INT      NOT NULL DEFAULT 0,
@@ -86,12 +86,10 @@ CREATE TABLE IF NOT EXISTS notification_sent_history
     type       VARCHAR(50) NOT NULL,
     monitor_id INT         NOT NULL,
     days       INT         NOT NULL,
+    INDEX good_index(type, monitor_id, days),
     UNIQUE (type, monitor_id, days),
     FOREIGN KEY (monitor_id) REFERENCES monitor (id) ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS good_index
-    ON notification_sent_history (type, monitor_id, days);
 
 CREATE TABLE IF NOT EXISTS monitor_tls_info
 (
@@ -122,23 +120,11 @@ CREATE TABLE IF NOT EXISTS heartbeat
     time       DATETIME NOT NULL,
     ping       INT,
     duration   INT      NOT NULL DEFAULT 0,
+    INDEX important(important),
+    INDEX monitor_important_time_index(monitor_id, important, time),
+    INDEX monitor_time_index(monitor_id, time),
     FOREIGN KEY (monitor_id) REFERENCES monitor (id) ON UPDATE CASCADE ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS important
-    ON heartbeat (important);
-
-CREATE INDEX IF NOT EXISTS monitor_id
-    ON heartbeat (monitor_id);
-
-CREATE INDEX IF NOT EXISTS monitor_important_time_index
-    ON heartbeat (monitor_id, important, time);
-
-CREATE INDEX IF NOT EXISTS monitor_time_index
-    ON heartbeat (monitor_id, time);
-
-CREATE INDEX IF NOT EXISTS user_id
-    ON monitor (user_id);
 
 CREATE TABLE IF NOT EXISTS monitor_group
 (
@@ -146,24 +132,20 @@ CREATE TABLE IF NOT EXISTS monitor_group
     monitor_id INT     NOT NULL,
     group_id   INT     NOT NULL,
     weight     INT NOT NULL DEFAULT 1000,
+    INDEX fk(monitor_id, group_id),
     FOREIGN KEY (monitor_id) REFERENCES monitor (id) ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (group_id) REFERENCES `group` (id) ON UPDATE CASCADE ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS fk
-    ON monitor_group (monitor_id, group_id);
 
 CREATE TABLE IF NOT EXISTS monitor_notification
 (
     id              INT PRIMARY KEY AUTO_INCREMENT,
     monitor_id      INT NOT NULL,
     notification_id INT NOT NULL,
+    INDEX monitor_notification_index(monitor_id, notification_id),
     FOREIGN KEY (monitor_id) REFERENCES monitor (id) ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (notification_id) REFERENCES notification (id) ON UPDATE CASCADE ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS monitor_notification_index
-    ON monitor_notification (monitor_id, notification_id);
 
 CREATE TABLE IF NOT EXISTS monitor_tag
 (
@@ -174,9 +156,3 @@ CREATE TABLE IF NOT EXISTS monitor_tag
     FOREIGN KEY (monitor_id) REFERENCES monitor (id) ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (tag_id) REFERENCES tag (id) ON UPDATE CASCADE ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS monitor_tag_monitor_id_index
-    ON monitor_tag (monitor_id);
-
-CREATE INDEX IF NOT EXISTS monitor_tag_tag_id_index
-    ON monitor_tag (tag_id);

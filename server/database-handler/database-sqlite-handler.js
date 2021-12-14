@@ -5,7 +5,6 @@ const { debug, sleep } = require("../../src/util");
 const dayjs = require("dayjs");
 const knex = require("knex");
 
-
 /**
  * Database & App Data Folder
  */
@@ -54,6 +53,7 @@ class DatabaseSqlite {
         "patch-2fa-invalidate-used-token.sql": true,
         "patch-notification_sent_history.sql": true,
         "patch-monitor-basic-auth.sql": true,
+        "patch-proxy.sql": true,
     }
 
     /**
