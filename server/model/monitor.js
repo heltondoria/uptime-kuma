@@ -11,6 +11,7 @@ const { tcping, ping, dnsResolve, checkCertificate, checkStatusCode, getTotalCli
 const { R } = require("redbean-node");
 const { BeanModel } = require("redbean-node/dist/bean-model");
 const { Notification } = require("../notification");
+const { Proxy } = require("../proxy");
 const { demoMode } = require("../config");
 const version = require("../../package.json").version;
 const apicache = require("../modules/apicache");
@@ -77,6 +78,7 @@ class Monitor extends BeanModel {
             dns_resolve_server: this.dns_resolve_server,
             dns_last_result: this.dns_last_result,
             pushToken: this.pushToken,
+            proxyId: this.proxy_id,
             notificationIDList,
             tags: tags,
         };
@@ -119,6 +121,19 @@ class Monitor extends BeanModel {
 
         const beat = async () => {
 
+            let beatInterval = this.interval;
+
+            if (! beatInterval) {
+                beatInterval = 1;
+            }
+
+            if (demoMode) {
+                if (beatInterval < 20) {
+                    console.log("beat interval too low, reset to 20s");
+                    beatInterval = 20;
+                }
+            }
+
             // Expose here for prometheus update
             // undefined if not https
             let tlsInfo = undefined;
@@ -160,6 +175,11 @@ class Monitor extends BeanModel {
                         };
                     }
 
+                    const httpsAgentOptions = {
+                        maxCachedSessions: 0, // Use Custom agent to disable session reuse (https://github.com/nodejs/node/issues/3940)
+                        rejectUnauthorized: !this.getIgnoreTls(),
+                    };
+
                     debug(`[${this.name}] Prepare Options for axios`);
 
                     const options = {
@@ -168,22 +188,38 @@ class Monitor extends BeanModel {
                         ...(this.body ? { data: JSON.parse(this.body) } : {}),
                         timeout: this.interval * 1000 * 0.8,
                         headers: {
-                            "Accept": "*/*",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
                             "User-Agent": "Uptime-Kuma/" + version,
                             ...(this.headers ? JSON.parse(this.headers) : {}),
                             ...(basicAuthHeader),
                         },
-                        httpsAgent: new https.Agent({
-                            maxCachedSessions: 0,      // Use Custom agent to disable session reuse (https://github.com/nodejs/node/issues/3940)
-                            rejectUnauthorized: ! this.getIgnoreTls(),
-                        }),
                         maxRedirects: this.maxredirects,
                         validateStatus: (status) => {
                             return checkStatusCode(status, this.getAcceptedStatuscodes());
                         },
                     };
 
+                    if (this.proxy_id) {
+                        const proxy = await R.load("proxy", this.proxy_id);
+
+                        if (proxy && proxy.active) {
+                            const { httpAgent, httpsAgent } = Proxy.createAgents(proxy, {
+                                httpsAgentOptions: httpsAgentOptions,
+                            });
+
+                            options.proxy = false;
+                            options.httpAgent = httpAgent;
+                            options.httpsAgent = httpsAgent;
+                        }
+                    }
+
+                    if (!options.httpsAgent) {
+                        options.httpsAgent = new https.Agent(httpsAgentOptions);
+                    }
+
+                    debug(`[${this.name}] Axios Options: ${JSON.stringify(options)}`);
                     debug(`[${this.name}] Axios Request`);
+
                     let res = await axios.request(options);
                     bean.msg = `${res.status} - ${res.statusText}`;
                     bean.ping = dayjs().valueOf() - startTime;
@@ -303,7 +339,7 @@ class Monitor extends BeanModel {
                     } else {
                         // No need to insert successful heartbeat for push type, so end here
                         retries = 0;
-                        this.heartbeatInterval = setTimeout(beat, this.interval * 1000);
+                        this.heartbeatInterval = setTimeout(beat, beatInterval * 1000);
                         return;
                     }
 
@@ -377,8 +413,6 @@ class Monitor extends BeanModel {
                 }
             }
 
-            let beatInterval = this.interval;
-
             debug(`[${this.name}] Check isImportant`);
             let isImportant = Monitor.isImportantBeat(isFirstBeat, previousBeat?.status, bean.status);
 
@@ -422,14 +456,6 @@ class Monitor extends BeanModel {
             previousBeat = bean;
 
             if (! this.isStop) {
-
-                if (demoMode) {
-                    if (beatInterval < 20) {
-                        console.log("beat interval too low, reset to 20s");
-                        beatInterval = 20;
-                    }
-                }
-
                 debug(`[${this.name}] SetTimeout for next check.`);
                 this.heartbeatInterval = setTimeout(safeBeat, beatInterval * 1000);
             } else {
